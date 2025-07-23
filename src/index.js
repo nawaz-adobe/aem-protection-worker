@@ -1,34 +1,20 @@
 import { load } from 'cheerio';
 
 export default {
+  // Configuration
+  AEM_ORIGIN: "https://issue-20--www--cmegroup.aem.page",
+  DEFAULT_PAGE_TEASER: "/fragments/teasers/video-teaser",
+  DEFAULT_SECTION_TEASER: "/fragments/teasers/section-teaser",
+  DEFAULT_BLOCK_TEASER: "/fragments/teasers/block-teaser",
+
   async fetch(request) {
     const reqUrl = new URL(request.url);
-    const aemUrl = new URL(reqUrl.pathname, "https://issue-20--www--cmegroup.aem.page");
+    const aemUrl = new URL(reqUrl.pathname, this.AEM_ORIGIN);
     const path = reqUrl.pathname;
-    // Bypass protection logic for header fragment
-    if (path.startsWith('/nav.plain.html')) {
-      console.log('[DEBUG] Bypassing protection logic for header fragment');
-      console.log('[DEBUG] Fetching original response');
-      // Log all headers being forwarded
-      console.log('[DEBUG] Forwarding headers:');
-      for (const [key, value] of request.headers.entries()) {
-        console.log(`${key}: ${value}`);
-      }
-      const init = {
-        method: request.method,
-        headers: request.headers,
-        body: request.body,
-        redirect: 'follow',
-      };
-      const originResponse = await fetch(aemUrl, init);
-      console.log('[DEBUG] Original response:', originResponse);
-      // Add CORS header
-      const newHeaders = new Headers(originResponse.headers);
-      newHeaders.set('Access-Control-Allow-Origin', '*');
-      return new Response(originResponse.body, {
-        status: originResponse.status,
-        headers: newHeaders,
-      });
+
+    // Bypass protection logic for all fragment requests
+    if (path.startsWith('/fragments/') || path.startsWith('/nav.plain.html')) {
+      return await this.handleHeaderFragment(request, aemUrl);
     }
 
     const originResponse = await fetch(aemUrl);
@@ -38,73 +24,208 @@ export default {
       return originResponse;
     }
 
-    // Clone response body for sniffing (as a string)
     const html = await originResponse.text();
-    // console.log('[DEBUG] Original HTML:', html);
-
-    // Log the entire original HTML
-    // console.log('[DEBUG] Original HTML (full):\n' + html);
+    const $ = load(html);
 
     // Check for page-level protection
-    const isPageProtected = /<meta[^>]+name=["']visibility["'][^>]+content=["']protected["'][^>]*>/i.test(html);
+    const pageProtectionMetadata = this.checkPageLevelProtection($, html);
+    if (pageProtectionMetadata.isProtected) {
+      return this.applyPageLevelProtection(html, pageProtectionMetadata.teaserPath, originResponse);
+    }
 
-    // Use cheerio to extract fragment path for page-level protection
-    const $ = load(html);
-    const pageFragmentPath = $("meta[name='teaser']").attr('content') || '/fragments/teasers/video-teaser';
+    // Check for section-level protection
+    const sectionProtectionMetadata = this.checkSectionLevelProtection($);
+    if (sectionProtectionMetadata.isProtected) {
+      return this.applySectionLevelProtection($, html, sectionProtectionMetadata, originResponse);
+    }
 
-    if (isPageProtected) {
-      // Use HTMLRewriter to replace the content of <main> only, using the extracted fragment path
-      const rewrittenStream = new HTMLRewriter()
-        .on('main', {
-          element(el) {
-            el.setInnerContent(`
-              <div class=\"section\">
-                <div class=\"fragment\">
-                  <div>
-                    <a href=\"${pageFragmentPath}\">teaser</a>
-                  </div>
+    // Check for block-level protection
+    const blockProtectionMetadata = this.checkBlockLevelProtection($);
+    if (blockProtectionMetadata.isProtected) {
+      return this.applyBlockLevelProtection($, html, blockProtectionMetadata, originResponse);
+    }
+
+    return new Response(html, {
+      status: originResponse.status,
+      headers: originResponse.headers,
+    });
+  },
+
+  // Handle header fragment requests
+  async handleHeaderFragment(request, aemUrl) {
+    for (const [key, value] of request.headers.entries()) {
+      console.log(`${key}: ${value}`);
+    }
+    
+    const init = {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      redirect: 'follow',
+    };
+    
+    const originResponse = await fetch(aemUrl, init);
+    
+    // Add CORS header
+    const newHeaders = new Headers(originResponse.headers);
+    newHeaders.set('Access-Control-Allow-Origin', '*');
+    
+    return new Response(originResponse.body, {
+      status: originResponse.status,
+      headers: newHeaders,
+    });
+  },
+
+  checkPageLevelProtection($, html) {
+    const visibilityMeta = $("meta[name='visibility']");
+    const isPageProtected = visibilityMeta.length > 0 && visibilityMeta.attr('content') === 'protected';
+    const pageTeaserPath = $("meta[name='teaser']").attr('content') || this.DEFAULT_PAGE_TEASER;
+    
+    return {
+      isProtected: isPageProtected,
+      teaserPath: pageTeaserPath
+    };
+  },
+
+  applyPageLevelProtection(html, teaserPath, originResponse) {
+    const rewrittenStream = new HTMLRewriter()
+      .on('main', {
+        element(el) {
+          el.setInnerContent(`
+            <div class="section">
+              <div class="fragment">
+                <div>
+                  <a href="${teaserPath}">teaser</a>
                 </div>
               </div>
-            `, { html: true });
-          },
-        })
-        .transform(new Response(html, {
-          status: originResponse.status,
-          headers: originResponse.headers,
-        }));
-      // Buffer the rewritten stream for logging
-      const afterHtml = await rewrittenStream.clone().text();
-      console.log('[DEBUG] After HTML (page-level, full):\n' + afterHtml);
-      return rewrittenStream;
-    }
-
-    // Only transform if ".protected" is present (block-level protection)
-    if (!html.includes('protected')) {
-      return new Response(html, {
+            </div>
+          `, { html: true });
+        },
+      })
+      .transform(new Response(html, {
         status: originResponse.status,
         headers: originResponse.headers,
-      });
-    }
+      }));
+    
+    console.log('[DEBUG] Page-level protection applied successfully');
+    return rewrittenStream;
+  },
 
-    // Use cheerio to extract fragment paths from the last child div of each protected block
-    const fragmentPaths = [];
-    $("div[class*='protected']").each((i, el) => {
-      const lastDiv = $(el).find('div').last();
-      fragmentPaths.push(lastDiv.text().trim());
+  checkSectionLevelProtection($) {
+    const protectedSections = [];
+    let totalSections = 0;
+    let sectionsWithMetadata = 0;
+    let sectionsWithVisibility = 0;
+    let protectedSectionsFound = 0;
+    
+    $('main div').each((_, el) => {
+      totalSections++;
+      const $section = $(el);
+      const sectionMetadata = $section.find('.section-metadata');
+      
+      if (sectionMetadata.length > 0) {
+        sectionsWithMetadata++;
+        
+        const visibilityDiv = sectionMetadata.find('div').filter((_, element) => {
+          return $(element).text().trim() === 'visibility';
+        });
+        
+        if (visibilityDiv.length > 0) {
+          sectionsWithVisibility++;
+          const visibilityValue = visibilityDiv.next().length > 0 ? visibilityDiv.next().text().trim() : '';
+          
+          if (visibilityValue === 'protected') {
+            protectedSectionsFound++;
+            
+            const teaserDiv = sectionMetadata.find('div').filter((_, element) => {
+              return $(element).text().trim() === 'teaser';
+            });
+            
+            let teaserPath = this.DEFAULT_SECTION_TEASER;
+            if (teaserDiv.length > 0) {
+              const teaserText = teaserDiv.next().length > 0 ? teaserDiv.next().text().trim() : '';
+              if (teaserText && teaserText.trim()) {
+                teaserPath = teaserText.trim();
+              }
+            }
+            
+            // Store the element's outerHTML for later replacement
+            const elementHtml = $(el).prop('outerHTML');
+            protectedSections.push({
+              elementHtml: elementHtml,
+              teaserPath: teaserPath
+            });
+          }
+        }
+      }
     });
 
-    // Use HTMLRewriter to replace each protected block with the correct fragment
+    return {
+      isProtected: protectedSections.length > 0,
+      sections: protectedSections
+    };
+  },
+
+  applySectionLevelProtection($, html, protectionMetadata, originResponse) {
+    let modifiedHtml = html;
+    
+    // Replace each protected section with its teaser
+    protectionMetadata.sections.forEach((section, index) => {
+      const teaserHtml = `
+        <div class="fragment">
+          <div>
+            <a href="${section.teaserPath}">teaser</a>
+          </div>
+        </div>
+      `;
+      
+      // Extract the opening div tag to preserve the section structure
+      const sectionStartMatch = section.elementHtml.match(/<div[^>]*>/);
+      if (sectionStartMatch) {
+        const sectionStartTag = sectionStartMatch[0];
+        const sectionWithFragment = sectionStartTag + 
+          '<div class="section-wrapper">' + teaserHtml + '</div>' + 
+          '</div>';
+        modifiedHtml = modifiedHtml.replace(section.elementHtml, sectionWithFragment);
+      }
+    }); 
+
+    console.log('[DEBUG] Section-level protection applied successfully');
+    
+    return new Response(modifiedHtml, {
+      status: originResponse.status,
+      headers: originResponse.headers,
+    });
+  },
+
+  // Check for block-level protection
+  checkBlockLevelProtection($) {
+    const teaserPaths = [];
+    
+    $("div[class*='protected']").each((i, el) => {
+      const lastDiv = $(el).find('div').last();
+      teaserPaths.push(lastDiv.text().trim());
+    });
+    
+    return {
+      isProtected: teaserPaths.length > 0,
+      teaserPaths: teaserPaths
+    };
+  },
+
+  // Apply block-level protection
+  applyBlockLevelProtection($, html, protectionMetadata, originResponse) {
     let blockIndex = 0;
-    const blockRewrittenStream = new HTMLRewriter()
+    
+    const rewrittenStream = new HTMLRewriter()
       .on("div[class*='protected']", {
         element(el) {
-          console.log(fragmentPaths[blockIndex]);
-          const path = fragmentPaths[blockIndex] || '/fragments/teasers/video-teaser';
+          const path = protectionMetadata.teaserPaths[blockIndex] || this.DEFAULT_BLOCK_TEASER;
           blockIndex++;
           el.replace(`
-            <div class=\"fragment\">
+            <div class="fragment">
               <div>
-                <a href=\"${path}\">teaser</a>
+                <a href="${path}">teaser</a>
               </div>
             </div>
           `, { html: true });
@@ -114,9 +235,8 @@ export default {
         status: originResponse.status,
         headers: originResponse.headers,
       }));
-    // Buffer the rewritten stream for logging
-    const afterBlockHtml = await blockRewrittenStream.clone().text();
-    // console.log('[DEBUG] After HTML (block-level, full):\n' + afterBlockHtml);
-    return blockRewrittenStream;
-  },
+    
+    console.log('[DEBUG] Block-level protection applied successfully');
+    return rewrittenStream;
+  }
 };
