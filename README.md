@@ -1,50 +1,71 @@
-# Protected Worker
+# AEM Content Protection Worker
 
-A Cloudflare Worker that acts as a proxy/protection layer for Adobe Experience Manager (AEM) websites. This worker fetches content from an AEM site and applies protection logic to hide certain content from users, showing teaser fragments instead.
+A Cloudflare Worker that implements a three-tier content protection system for Adobe Experience Manager (AEM) websites.
 
-## Features
+## 🏗️ Architecture
 
-- **Header Fragment Bypass**: Special handling for navigation fragments
-- **Page-Level Protection**: Replaces entire page content with teaser fragments when protected
-- **Block-Level Protection**: Replaces individual protected blocks with teaser fragments
-- **CORS Support**: Adds necessary CORS headers for cross-origin requests
-- **Content Type Filtering**: Only processes HTML content, passes through other content types
+The codebase uses a monolithic structure with all functionality contained in a single `src/index.js` file for simplicity and ease of deployment:
 
-## How It Works
+```
+src/
+├── index.js                     # Main entry point with all protection logic
+└── README.md                    # Documentation
 
-1. **Request Processing**: The worker intercepts requests to the AEM site
-2. **Content Fetching**: Fetches the original content from the AEM backend
-3. **Protection Detection**: 
-   - Checks for page-level protection via meta tags
-   - Scans for block-level protection via CSS classes
-4. **Content Transformation**: Uses HTMLRewriter to replace protected content with teaser fragments
-5. **Response Delivery**: Returns the transformed content with appropriate headers
+test/
+├── index.spec.js               # Test files
+└── ...
 
-## Protection Types
-
-### Page-Level Protection
-- Detected by: `<meta name="visibility" content="protected">`
-- Action: Replaces entire `<main>` content with a teaser fragment
-- Fragment path: Extracted from `<meta name="teaser">` or defaults to `/fragments/teasers/video-teaser`
-
-### Block-Level Protection
-- Detected by: `div` elements with "protected" in their class names
-- Action: Replaces each protected block with individual teaser fragments
-- Fragment paths: Extracted from the last child div of each protected block
-
-## Development
-
-### Prerequisites
-- Node.js
-- Wrangler CLI
-
-### Setup
-```bash
-npm install
+package.json, wrangler.jsonc, etc.
 ```
 
-### Local Development
+## 🛡️ Protection Levels
+
+### 1. Page-Level Protection
+- **Trigger**: `<meta name="visibility" content="protected">`
+- **Action**: Replaces entire `<main>` content with teaser
+- **Teaser**: `<meta name="teaser" content="/path/to/teaser">`
+
+### 2. Section-Level Protection
+- **Trigger**: Section metadata with `visibility: protected`
+- **Action**: Replaces specific sections with teasers
+- **Structure**: 
+  ```html
+  <div class="section-metadata">
+    <div>visibility</div>
+    <div>protected</div>
+    <div>teaser</div>
+    <div>/fragments/teasers/section-teaser</div>
+  </div>
+  ```
+
+### 3. Block-Level Protection
+Two approaches for protecting content blocks:
+
+#### Approach 1: ID-Based Removal
+- **Trigger**: Two blocks with same `id-X` class, one with `protected`
+- **Action**: Removes the protected block when normal block exists
+- **Example**:
+  ```html
+  <div class="table id-1 protected">...</div>  <!-- Removed -->
+  <div class="table id-1">...</div>            <!-- Kept -->
+  ```
+
+#### Approach 2: Fragment-Based Teaser
+- **Trigger**: Protected block with teaser structure
+- **Action**: Replaces with teaser fragment
+- **Structure**:
+  ```html
+  <div class="protected">
+    <div>teaser</div>
+    <div>/fragments/teasers/block-teaser</div>
+  </div>
+  ```
+
+## 🚀 Usage
+
+### Development
 ```bash
+npm install
 npm run dev
 ```
 
@@ -58,15 +79,69 @@ npm test
 npm run deploy
 ```
 
-## Configuration
+## 📁 Code Structure
 
-The worker is configured via `wrangler.jsonc` and targets the AEM site at `https://issue-20--www--cmegroup.aem.page`.
+The `src/index.js` file contains all the protection logic organized into logical methods:
 
-## Dependencies
+### Configuration
+- `AEM_ORIGIN`: Target AEM site URL
+- `DEFAULT_PAGE_TEASER`: Default teaser for page-level protection
+- `DEFAULT_SECTION_TEASER`: Default teaser for section-level protection
+- `DEFAULT_BLOCK_TEASER`: Default teaser for block-level protection
 
-- `cheerio`: HTML parsing and manipulation
+### HTML Generation
+- `generateFragmentHtml(teaserPath)`: Generates section/page teaser HTML
+- `generateBlockFragmentHtml(teaserPath)`: Generates block teaser HTML
+
+### Protection Logic
+- `checkPageLevelProtection($)`: Detects page-level protection
+- `applyPageLevelProtection(html, teaserPath, originResponse)`: Applies page-level protection
+- `checkSectionLevelProtection($)`: Detects section and block protection
+- `applySectionLevelProtection($, html, protectionMetadata, originResponse)`: Applies section/block protection
+- `checkBlockProtectionInSection($section, teaserBlocks, $)`: Handles block protection within sections
+
+### Request Handling
+- `handleHeaderFragment(request, aemUrl)`: Handles fragment requests with CORS
+- `fetch(request)`: Main request handler and protection orchestrator
+
+## 🔧 Configuration
+
+All configuration is centralized at the top of `src/index.js`:
+
+```javascript
+export default {
+  AEM_ORIGIN: "https://main--www--cmegroup.aem.page",
+  DEFAULT_PAGE_TEASER: "/fragments/teasers/content-teaser",
+  DEFAULT_SECTION_TEASER: "/fragments/teasers/content-teaser",
+  DEFAULT_BLOCK_TEASER: "/fragments/teasers/block-teaser",
+  // ... rest of the code
+};
+```
+
+## 🎯 Benefits of Monolithic Structure
+
+- **Simplicity**: Single file deployment and maintenance
+- **Performance**: No module loading overhead
+- **Reliability**: No import/export complexity
+- **Debugging**: All code in one place for easier troubleshooting
+- **Cloudflare Workers**: Optimized for single-file workers
+
+## 🔄 Protection Flow
+
+1. **Request Interception**: Worker intercepts requests to AEM site
+2. **Fragment Bypass**: Fragment requests bypass protection logic
+3. **Content Fetching**: Fetches original content from AEM backend
+4. **Protection Detection**: 
+   - Checks page-level protection via meta tags
+   - Scans sections for section-level protection
+   - Identifies block protection within sections
+5. **Content Transformation**: 
+   - Page-level: Uses HTMLRewriter for streaming transformation
+   - Section/Block: Uses Cheerio for DOM manipulation and string replacement
+6. **Response Delivery**: Returns transformed content with appropriate headers
+
+## 🛠️ Dependencies
+
+- `cheerio`: HTML parsing and DOM manipulation
 - `vitest`: Testing framework
-
-## License
-
-[Add your license here] 
+- `wrangler`: Cloudflare Workers deployment tool 

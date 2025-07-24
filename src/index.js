@@ -58,8 +58,6 @@ export default {
     // If no teaser blocks found, check for ID-based blocks
     const blocks = {};
     
-    
-    
     $section.find('div[class*="id-"]').each((_, blockEl) => {
       const $block = $(blockEl);
       const classAttr = $block.attr('class') || '';
@@ -68,7 +66,7 @@ export default {
       
       if (!idMatch) return;
       
-              const blockId = idMatch[1];
+      const blockId = idMatch[1];
       
       if (!blocks[blockId]) {
         blocks[blockId] = { normal: null, protected: null };
@@ -89,8 +87,6 @@ export default {
       });
     }
   },
-
-
 
   async handleHeaderFragment(request, aemUrl) {
     try {
@@ -163,7 +159,6 @@ export default {
         headers: originResponse.headers,
       }));
     
-
     return rewrittenStream;
   },
 
@@ -175,15 +170,12 @@ export default {
       const $section = $(el);
       const sectionMetadata = $section.find('.section-metadata');
       
-
-      
       if (sectionMetadata.length > 0) {
         // Check for section-level protection
         const visibilityDiv = sectionMetadata.find('div').filter((_, div) => 
           $(div).text().trim() === 'visibility'
         );
         if (visibilityDiv.length > 0 && visibilityDiv.next().text().trim() === 'protected') {
-  
           const teaserDiv = sectionMetadata.find('div').filter((_, div) => 
             $(div).text().trim() === 'teaser'
           );
@@ -225,13 +217,9 @@ export default {
         finalHtml = finalHtml.replace(block.elementHtml, this.generateBlockFragmentHtml(block.teaserPath));
       }); 
     }
-
-
     
     return finalHtml;
   },
-
-
 
   // Main driver function
   async fetch(request) {
@@ -277,8 +265,6 @@ export default {
         modifiedHtml = this.applySectionLevelProtection($, modifiedHtml, sectionProtectionMetadata, originResponse);
         protectionApplied = true;
       }
-
-
 
       if (protectionApplied) {
         return new Response(modifiedHtml, {
