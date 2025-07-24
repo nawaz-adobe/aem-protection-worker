@@ -1,82 +1,144 @@
 import { load } from 'cheerio';
 
 export default {
-  // Configuration
-  AEM_ORIGIN: "https://issue-20--www--cmegroup.aem.page",
-  DEFAULT_PAGE_TEASER: "/fragments/teasers/video-teaser",
-  DEFAULT_SECTION_TEASER: "/fragments/teasers/section-teaser",
+  AEM_ORIGIN: "https://main--www--cmegroup.aem.page",
+  DEFAULT_PAGE_TEASER: "/fragments/teasers/content-teaser",
+  DEFAULT_SECTION_TEASER: "/fragments/teasers/content-teaser",
   DEFAULT_BLOCK_TEASER: "/fragments/teasers/block-teaser",
 
-  async fetch(request) {
-    const reqUrl = new URL(request.url);
-    const aemUrl = new URL(reqUrl.pathname, this.AEM_ORIGIN);
-    const path = reqUrl.pathname;
-
-    // Bypass protection logic for all fragment requests
-    if (path.startsWith('/fragments/') || path.startsWith('/nav.plain.html')) {
-      return await this.handleHeaderFragment(request, aemUrl);
-    }
-
-    const originResponse = await fetch(aemUrl);
-    const contentType = originResponse.headers.get("content-type") || "";
-
-    if (!contentType.includes("text/html")) {
-      return originResponse;
-    }
-
-    const html = await originResponse.text();
-    const $ = load(html);
-
-    // Check for page-level protection
-    const pageProtectionMetadata = this.checkPageLevelProtection($, html);
-    if (pageProtectionMetadata.isProtected) {
-      return this.applyPageLevelProtection(html, pageProtectionMetadata.teaserPath, originResponse);
-    }
-
-    // Check for section-level protection
-    const sectionProtectionMetadata = this.checkSectionLevelProtection($);
-    if (sectionProtectionMetadata.isProtected) {
-      return this.applySectionLevelProtection($, html, sectionProtectionMetadata, originResponse);
-    }
-
-    // Check for block-level protection
-    const blockProtectionMetadata = this.checkBlockLevelProtection($);
-    if (blockProtectionMetadata.isProtected) {
-      return this.applyBlockLevelProtection($, html, blockProtectionMetadata, originResponse);
-    }
-
-    return new Response(html, {
-      status: originResponse.status,
-      headers: originResponse.headers,
-    });
+  generateFragmentHtml(teaserPath) {
+    return `<div>
+        <p><a href="${teaserPath}">${this.AEM_ORIGIN}${teaserPath}</a></p>
+      </div>`;
   },
 
-  // Handle header fragment requests
+  generateBlockFragmentHtml(teaserPath) {
+    return `<p><a href="${teaserPath}">${this.AEM_ORIGIN}${teaserPath}</a></p>`;
+  },
+
+  checkBlockProtectionInSection($section, teaserBlocks, $) {
+    // First, check for teaser blocks (higher priority)
+    const protectedDivsWithTeasers = $section.find("div[class*='protected']").filter((_, el) => {
+      const $el = $(el);
+      const divs = $el.find('div');
+      
+      // Check if this has the teaser structure: <div>teaser</div> and <div>/fragments/...</div>
+      let hasTeaserKeyword = false;
+      let hasFragmentPath = false;
+      
+      divs.each((_, divEl) => {
+        const $div = $(divEl);
+        const text = $div.text().trim();
+        if (text === 'teaser') {
+          hasTeaserKeyword = true;
+        }
+        if (text.includes('/fragments/') || text.includes('/teasers/') || (text.startsWith('/') && text.length > 1)) {
+          hasFragmentPath = true;
+        }
+      });
+      
+      return hasTeaserKeyword && hasFragmentPath;
+    });
+    
+    if (protectedDivsWithTeasers.length > 0) {
+      // Use teaser approach for this section
+      protectedDivsWithTeasers.each((_, el) => {
+        const $el = $(el);
+        const lastDiv = $el.find('div').last();
+        const teaserText = lastDiv.text().trim();
+        teaserBlocks.push({
+          elementHtml: $el.prop('outerHTML'),
+          teaserPath: teaserText
+        });
+      });
+
+      return; // Exit early - teaser protection takes priority
+    }
+    
+    // If no teaser blocks found, check for ID-based blocks
+    const blocks = {};
+    
+    
+    
+    $section.find('div[class*="id-"]').each((_, blockEl) => {
+      const $block = $(blockEl);
+      const classAttr = $block.attr('class') || '';
+      const idMatch = classAttr.match(/id-([^\s]+)/);
+      const isProtected = classAttr.includes('protected');
+      
+      if (!idMatch) return;
+      
+              const blockId = idMatch[1];
+      
+      if (!blocks[blockId]) {
+        blocks[blockId] = { normal: null, protected: null };
+      }
+      
+      if (isProtected) {
+        blocks[blockId].protected = $block;
+      } else {
+        blocks[blockId].normal = $block;
+      }
+    });
+    
+    if (Object.keys(blocks).length > 0) {
+      Object.entries(blocks).forEach(([blockId, blockPair]) => {
+        if (blockPair.normal && blockPair.protected) {
+          blockPair.protected.remove();
+        }
+      });
+    }
+  },
+
+
+
   async handleHeaderFragment(request, aemUrl) {
-    for (const [key, value] of request.headers.entries()) {
-      console.log(`${key}: ${value}`);
+    try {
+      for (const [key, value] of request.headers.entries()) {
+        // console.log(`${key}: ${value}`);
+      }
+      
+      const originResponse = await fetch(aemUrl, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        redirect: 'follow',
+      });
+      
+      if (!originResponse.ok) {
+        // Don't include body for status codes that don't allow it
+        if ([101, 204, 205, 304].includes(originResponse.status)) {
+          return new Response(null, {
+            status: originResponse.status
+          });
+        }
+        return new Response(`Fragment server error: ${originResponse.status}`, {
+          status: originResponse.status
+        });
+      }
+      
+      const newHeaders = new Headers(originResponse.headers);
+      newHeaders.set('Access-Control-Allow-Origin', '*');
+      
+      // Handle null body for certain status codes
+      if ([101, 204, 205, 304].includes(originResponse.status)) {
+        return new Response(null, {
+          status: originResponse.status,
+          headers: newHeaders,
+        });
+      }
+      
+      return new Response(originResponse.body, {
+        status: originResponse.status,
+        headers: newHeaders,
+      });
+    } catch (error) {
+      console.error('[ERROR] Fragment handling failed:', error);
+      return new Response('Fragment server error', { status: 500 });
     }
-    
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-      redirect: 'follow',
-    };
-    
-    const originResponse = await fetch(aemUrl, init);
-    
-    // Add CORS header
-    const newHeaders = new Headers(originResponse.headers);
-    newHeaders.set('Access-Control-Allow-Origin', '*');
-    
-    return new Response(originResponse.body, {
-      status: originResponse.status,
-      headers: newHeaders,
-    });
   },
 
-  checkPageLevelProtection($, html) {
+  checkPageLevelProtection($) {
     const visibilityMeta = $("meta[name='visibility']");
     const isPageProtected = visibilityMeta.length > 0 && visibilityMeta.attr('content') === 'protected';
     const pageTeaserPath = $("meta[name='teaser']").attr('content') || this.DEFAULT_PAGE_TEASER;
@@ -88,18 +150,12 @@ export default {
   },
 
   applyPageLevelProtection(html, teaserPath, originResponse) {
+    const generateFragment = this.generateFragmentHtml.bind(this);
+    
     const rewrittenStream = new HTMLRewriter()
       .on('main', {
         element(el) {
-          el.setInnerContent(`
-            <div class="section">
-              <div class="fragment">
-                <div>
-                  <a href="${teaserPath}">teaser</a>
-                </div>
-              </div>
-            </div>
-          `, { html: true });
+          el.setInnerContent(generateFragment(teaserPath), { html: true });
         },
       })
       .transform(new Response(html, {
@@ -107,136 +163,137 @@ export default {
         headers: originResponse.headers,
       }));
     
-    console.log('[DEBUG] Page-level protection applied successfully');
+
     return rewrittenStream;
   },
 
   checkSectionLevelProtection($) {
     const protectedSections = [];
-    let totalSections = 0;
-    let sectionsWithMetadata = 0;
-    let sectionsWithVisibility = 0;
-    let protectedSectionsFound = 0;
+    const teaserBlocks = [];
     
-    $('main div').each((_, el) => {
-      totalSections++;
+    $('main > div').each((index, el) => {
       const $section = $(el);
       const sectionMetadata = $section.find('.section-metadata');
       
+
+      
       if (sectionMetadata.length > 0) {
-        sectionsWithMetadata++;
-        
-        const visibilityDiv = sectionMetadata.find('div').filter((_, element) => {
-          return $(element).text().trim() === 'visibility';
-        });
-        
-        if (visibilityDiv.length > 0) {
-          sectionsWithVisibility++;
-          const visibilityValue = visibilityDiv.next().length > 0 ? visibilityDiv.next().text().trim() : '';
+        // Check for section-level protection
+        const visibilityDiv = sectionMetadata.find('div').filter((_, div) => 
+          $(div).text().trim() === 'visibility'
+        );
+        if (visibilityDiv.length > 0 && visibilityDiv.next().text().trim() === 'protected') {
+  
+          const teaserDiv = sectionMetadata.find('div').filter((_, div) => 
+            $(div).text().trim() === 'teaser'
+          );
+          const teaserPath = teaserDiv.length > 0 ? teaserDiv.next().text().trim() : this.DEFAULT_SECTION_TEASER;
           
-          if (visibilityValue === 'protected') {
-            protectedSectionsFound++;
-            
-            const teaserDiv = sectionMetadata.find('div').filter((_, element) => {
-              return $(element).text().trim() === 'teaser';
-            });
-            
-            let teaserPath = this.DEFAULT_SECTION_TEASER;
-            if (teaserDiv.length > 0) {
-              const teaserText = teaserDiv.next().length > 0 ? teaserDiv.next().text().trim() : '';
-              if (teaserText && teaserText.trim()) {
-                teaserPath = teaserText.trim();
-              }
-            }
-            
-            // Store the element's outerHTML for later replacement
-            const elementHtml = $(el).prop('outerHTML');
-            protectedSections.push({
-              elementHtml: elementHtml,
-              teaserPath: teaserPath
-            });
-          }
+          protectedSections.push({
+            elementHtml: $(el).prop('outerHTML'),
+            teaserPath: teaserPath
+          });
+        } else {
+          // Section not protected, check for block protection
+          this.checkBlockProtectionInSection($section, teaserBlocks, $);
         }
+      } else {
+        // No section metadata, check for block protection
+        this.checkBlockProtectionInSection($section, teaserBlocks, $);
       }
     });
 
     return {
-      isProtected: protectedSections.length > 0,
-      sections: protectedSections
+      isProtected: protectedSections.length > 0 || teaserBlocks.length > 0,
+      sections: protectedSections,
+      teaserBlocks: teaserBlocks
     };
   },
 
   applySectionLevelProtection($, html, protectionMetadata, originResponse) {
-    let modifiedHtml = html;
+    // Get the modified HTML from Cheerio (this includes the ID-based removals)
+    let finalHtml = $.html();
     
-    // Replace each protected section with its teaser
-    protectionMetadata.sections.forEach((section, index) => {
-      const teaserHtml = `
-        <div class="fragment">
-          <div>
-            <a href="${section.teaserPath}">teaser</a>
-          </div>
-        </div>
-      `;
-      
-      // Extract the opening div tag to preserve the section structure
-      const sectionStartMatch = section.elementHtml.match(/<div[^>]*>/);
-      if (sectionStartMatch) {
-        const sectionStartTag = sectionStartMatch[0];
-        const sectionWithFragment = sectionStartTag + 
-          '<div class="section-wrapper">' + teaserHtml + '</div>' + 
-          '</div>';
-        modifiedHtml = modifiedHtml.replace(section.elementHtml, sectionWithFragment);
-      }
+    // Apply section-level protection to the Cheerio HTML
+    protectionMetadata.sections.forEach((section) => {
+      finalHtml = finalHtml.replace(section.elementHtml, this.generateFragmentHtml(section.teaserPath));
     }); 
 
-    console.log('[DEBUG] Section-level protection applied successfully');
+    // Apply block-level protection to the Cheerio HTML
+    if (protectionMetadata.teaserBlocks) {
+      protectionMetadata.teaserBlocks.forEach((block) => {
+        finalHtml = finalHtml.replace(block.elementHtml, this.generateBlockFragmentHtml(block.teaserPath));
+      }); 
+    }
+
+
     
-    return new Response(modifiedHtml, {
-      status: originResponse.status,
-      headers: originResponse.headers,
-    });
+    return finalHtml;
   },
 
-  // Check for block-level protection
-  checkBlockLevelProtection($) {
-    const teaserPaths = [];
-    
-    $("div[class*='protected']").each((i, el) => {
-      const lastDiv = $(el).find('div').last();
-      teaserPaths.push(lastDiv.text().trim());
-    });
-    
-    return {
-      isProtected: teaserPaths.length > 0,
-      teaserPaths: teaserPaths
-    };
-  },
 
-  // Apply block-level protection
-  applyBlockLevelProtection($, html, protectionMetadata, originResponse) {
-    let blockIndex = 0;
-    
-    const rewrittenStream = new HTMLRewriter()
-      .on("div[class*='protected']", {
-        element(el) {
-          const path = protectionMetadata.teaserPaths[blockIndex] || this.DEFAULT_BLOCK_TEASER;
-          blockIndex++;
-          el.replace(`
-            <div class="fragment">
-              <div>
-                <a href="${path}">teaser</a>
-              </div>
-            </div>
-          `, { html: true });
-        }
-      })
-      .transform(new Response(html, {
+
+  // Main driver function
+  async fetch(request) {
+    try {
+      const reqUrl = new URL(request.url);
+      const aemUrl = new URL(reqUrl.pathname, this.AEM_ORIGIN);
+      const path = reqUrl.pathname;
+
+      // Bypass protection logic for all fragment requests
+      if (path.startsWith('/fragments/') || path.startsWith('/nav.plain.html')) {
+        return await this.handleHeaderFragment(request, aemUrl);
+      }
+
+      const originResponse = await fetch(aemUrl);
+      
+      if (!originResponse.ok) {
+        return new Response(`Origin server error: ${originResponse.status}`, {
+          status: originResponse.status
+        });
+      }
+
+      const contentType = originResponse.headers.get("content-type") || "";
+
+      if (!contentType.includes("text/html")) {
+        return originResponse;
+      }
+
+      const html = await originResponse.text();
+      const $ = load(html);
+
+      let modifiedHtml = html;
+      let protectionApplied = false;
+
+      // Check for page-level protection (exclusive - replaces entire main content)
+      const pageProtectionMetadata = this.checkPageLevelProtection($);
+      if (pageProtectionMetadata.isProtected) {
+        return this.applyPageLevelProtection(html, pageProtectionMetadata.teaserPath, originResponse);
+      }
+
+      // Check for section-level protection (includes block protection)
+      const sectionProtectionMetadata = this.checkSectionLevelProtection($);
+      if (sectionProtectionMetadata.isProtected) {
+        modifiedHtml = this.applySectionLevelProtection($, modifiedHtml, sectionProtectionMetadata, originResponse);
+        protectionApplied = true;
+      }
+
+
+
+      if (protectionApplied) {
+        return new Response(modifiedHtml, {
+          status: originResponse.status,
+          headers: originResponse.headers,
+        });
+      }
+
+      return new Response(html, {
         status: originResponse.status,
         headers: originResponse.headers,
-      }));
-    
-    console.log('[DEBUG] Block-level protection applied successfully');
-    return rewrittenStream;
+      });
+    } catch (error) {
+      console.error('[ERROR] Protection worker failed:', error);
+      return new Response('Internal server error', { status: 500 });
+    }
   }
 };
