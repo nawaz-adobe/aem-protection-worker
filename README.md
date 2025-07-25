@@ -88,7 +88,7 @@ The worker implements a hierarchical three-tier protection system:
   ```
 
 ### 3. Block-Level Protection (Lowest Priority)
-Two protection mechanisms for content blocks:
+Two protection mechanisms for blocks:
 
 #### A. ID-Based Block Removal
 - **Trigger**: Two blocks with same `id-X` class, one with `protected`
