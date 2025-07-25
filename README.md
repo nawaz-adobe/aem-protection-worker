@@ -76,14 +76,14 @@ The worker implements a hierarchical three-tier protection system:
 - **Structure**: 
   ```html
   <div class="section-metadata">
-  	<div>
-    	<div>visibility</div>
-    	<div>protected</div>
-  	</div>
-  	<div>
-    	<div>teaser</div>
-    	<div>/fragments/teasers/section-teaser</div>
-  	</div>
+    <div>
+      <div>visibility</div>
+      <div>protected</div>
+    </div>
+    <div>
+      <div>teaser</div>
+      <div>/fragments/teasers/section-teaser</div>
+    </div>
   </div>
   ```
 
