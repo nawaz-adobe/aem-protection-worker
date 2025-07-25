@@ -13,7 +13,7 @@ A Cloudflare Worker that implements a three-tier content protection system for A
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd my-protected-worker
+cd aem-protection-worker
 
 # Install dependencies
 npm install
