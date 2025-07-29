@@ -83,8 +83,8 @@ export default {
   },
 
   checkPageLevelProtection($) {
-    const visibilityMeta = $('meta[name=\'visibility\']');
-    const isPageProtected = visibilityMeta.length > 0 && visibilityMeta.attr('content') === 'protected';
+    const protectedMeta = $('meta[name=\'protected\']');
+    const isPageProtected = protectedMeta.length > 0 && protectedMeta.attr('content') === 'true';
     const pageTeaserPath = $('meta[name=\'teaser\']').attr('content') || this.DEFAULT_PAGE_TEASER;
     
     return {
@@ -119,11 +119,11 @@ export default {
       const sectionMetadata = $section.find('.section-metadata');
       
       if (sectionMetadata.length > 0) {
-        const visibilityDiv = sectionMetadata.find('div').filter((_, div) => 
-          $(div).text().trim() === 'visibility',
+        const protectedDiv = sectionMetadata.find('div').filter((_, div) => 
+          $(div).text().trim() === 'protected',
         );
 
-        if (visibilityDiv.length > 0 && visibilityDiv.next().text().trim() === 'protected') {
+        if (protectedDiv.length > 0 && protectedDiv.next().text().trim() === 'true') {
           const teaserDiv = sectionMetadata.find('div').filter((_, div) => 
             $(div).text().trim() === 'teaser',
           );
