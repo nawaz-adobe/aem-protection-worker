@@ -13,7 +13,7 @@ A Cloudflare Worker that implements a three-tier content protection system for A
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd my-protected-worker
+cd aem-protection-worker
 
 # Install dependencies
 npm install
@@ -76,15 +76,19 @@ The worker implements a hierarchical three-tier protection system:
 - **Structure**: 
   ```html
   <div class="section-metadata">
-    <div>visibility</div>
-    <div>protected</div>
-    <div>teaser</div>
-    <div>/fragments/teasers/section-teaser</div>
+    <div>
+      <div>visibility</div>
+      <div>protected</div>
+    </div>
+    <div>
+      <div>teaser</div>
+      <div>/fragments/teasers/section-teaser</div>
+    </div>
   </div>
   ```
 
 ### 3. Block-Level Protection (Lowest Priority)
-Two protection mechanisms for content blocks:
+Two protection mechanisms for blocks:
 
 #### A. ID-Based Block Removal
 - **Trigger**: Two blocks with same `id-X` class, one with `protected`
