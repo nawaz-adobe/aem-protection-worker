@@ -41,12 +41,17 @@ npm run deploy
 
 ## 🏗️ Architecture
 
-The worker uses a monolithic structure with all functionality contained in a single `src/index.js` file for simplicity and optimal performance:
+The worker uses a modular architecture with separate handlers for different protection types and centralized configuration:
 
 ```
-my-protected-worker/
+aem-protection-worker/
 ├── src/
-│   └── index.js                 # Main worker with all protection logic
+│   ├── index.js                 # Main worker entry point
+│   ├── config.js                # Centralized configuration
+│   └── handlers/
+│       ├── page-protection.js   # Page-level protection logic
+│       ├── section-protection.js # Section-level protection logic
+│       └── block-protection.js  # Block-level protection logic
 ├── test/
 │   └── index.spec.js            # Test suite
 ├── package.json                 # Dependencies and scripts
@@ -65,20 +70,20 @@ my-protected-worker/
 The worker implements a hierarchical three-tier protection system:
 
 ### 1. Page-Level Protection (Highest Priority)
-- **Trigger**: `<meta name="visibility" content="protected">` in page head
+- **Trigger**: `<meta name="protected" content="true">` in page head
 - **Action**: Replaces entire `<main>` content with teaser fragment
 - **Teaser Source**: `<meta name="teaser" content="/path/to/teaser">` or default
 - **Implementation**: Uses HTMLRewriter for streaming transformation
 
 ### 2. Section-Level Protection
-- **Trigger**: Section metadata with `visibility: protected`
+- **Trigger**: Section metadata with `protected: true`
 - **Action**: Replaces specific sections with teaser fragments
 - **Structure**: 
   ```html
   <div class="section-metadata">
     <div>
-      <div>visibility</div>
       <div>protected</div>
+      <div>true</div>
     </div>
     <div>
       <div>teaser</div>
@@ -126,21 +131,40 @@ The `fetch` method orchestrates the entire protection process:
 6. **Content Transformation**: Applies appropriate protection logic
 7. **Response Delivery**: Returns transformed content with original headers
 
-### Page-Level Protection Logic
+### Modular Protection Handlers
 
-The `checkPageLevelProtection` method examines the page's meta tags to determine if page-level protection is needed. It looks for a visibility meta tag set to "protected" and extracts the teaser path from a teaser meta tag or uses the default teaser path.
+#### Page Protection Handler (`src/handlers/page-protection.js`)
+- **`checkPageLevelProtection($)`**: Examines meta tags for page protection
+- **`applyPageLevelProtection()`**: Uses HTMLRewriter for streaming transformation
+- **`generateFragmentHtml()`**: Creates teaser HTML for page-level protection
 
-When page-level protection is detected, the `applyPageLevelProtection` method uses HTMLRewriter to perform streaming transformation of the entire main element, replacing it with the generated teaser fragment.
+#### Section Protection Handler (`src/handlers/section-protection.js`)
+- **`checkSectionLevelProtection($)`**: Analyzes sections and coordinates with block protection
+- **`applySectionLevelProtection()`**: Replaces protected sections with teasers
+- **`generateFragmentHtml()`**: Creates teaser HTML for section-level protection
+- **Flow Management**: Coordinates with block protection when no section protection is found
 
-### Section-Level Protection Logic
+#### Block Protection Handler (`src/handlers/block-protection.js`)
+- **`checkBlockProtectionInSection()`**: Implements two-priority block protection system
+- **`generateBlockFragmentHtml()`**: Creates teaser HTML for block-level protection
 
-The `checkSectionLevelProtection` method iterates through all sections within the main content area. For each section, it examines the section metadata to determine if protection is required. If section-level protection is found, it extracts the teaser path and marks the section for replacement.
+### Protection Logic Details
 
-If no section-level protection is detected, the method then checks for block-level protection within that section using the `checkBlockProtectionInSection` method.
+#### Page-Level Protection Logic
 
-### Block Protection Logic
+The page protection handler examines the page's meta tags to determine if page-level protection is needed. It looks for a protected meta tag set to "true" and extracts the teaser path from a teaser meta tag or uses the default teaser path.
 
-The `checkBlockProtectionInSection` method implements a two-priority system for block protection:
+When page-level protection is detected, the handler uses HTMLRewriter to perform streaming transformation of the entire main element, replacing it with the generated teaser fragment.
+
+#### Section-Level Protection Logic
+
+The section protection handler iterates through all sections within the main content area. For each section, it examines the section metadata to determine if protection is required. If section-level protection is found, it extracts the teaser path and marks the section for replacement.
+
+If no section-level protection is detected, the handler delegates to the block protection handler to check for block-level protection within that section.
+
+#### Block Protection Logic
+
+The block protection handler implements a two-priority system for block protection:
 
 **Priority 1: Fragment-Based Teaser Replacement**
 - Searches for protected divs that contain teaser structure
@@ -154,16 +178,31 @@ The `checkBlockProtectionInSection` method implements a two-priority system for 
 
 ### HTML Generation
 
-The worker generates teaser HTML that includes links back to the AEM origin. The `generateFragmentHtml` method creates section and page teaser HTML, while `generateBlockFragmentHtml` creates simpler block teaser HTML. Both methods include the full AEM origin URL in the generated links.
+The handlers generate teaser HTML that includes links back to the AEM origin. Each handler has its own HTML generation method that includes the full AEM origin URL in the generated links.
 
 ## ⚙️ Configuration
 
-All configuration is centralized at the top of `src/index.js`:
+All configuration is centralized in `src/config.js`:
 
-- **AEM_ORIGIN**: The target AEM site URL that the worker proxies
-- **DEFAULT_PAGE_TEASER**: Default teaser path for page-level protection
-- **DEFAULT_SECTION_TEASER**: Default teaser path for section-level protection  
-- **DEFAULT_BLOCK_TEASER**: Default teaser path for block-level protection
+```javascript
+export default {
+  AEM_ORIGIN: 'https://main--www--cmegroup.aem.live',
+  DEFAULT_PAGE_TEASER: '/fragments/teasers/content-teaser',
+  DEFAULT_SECTION_TEASER: '/fragments/teasers/content-teaser',
+  DEFAULT_BLOCK_TEASER: '/fragments/teasers/block-teaser',
+  
+  // Bypass paths that don't need protection logic
+  BYPASS_PATHS: [
+    '/fragments/',
+    '/nav.plain.html',
+    '/footer.plain.html',
+    '/eds-config/'
+  ],
+  
+  // Content types that should be processed
+  HTML_CONTENT_TYPES: ['text/html'],
+};
+```
 
 ## 🔄 Request Flow
 
@@ -180,11 +219,12 @@ All configuration is centralized at the top of `src/index.js`:
 
 ## 🎯 Benefits
 
-- **Performance**: Single-file worker with minimal overhead
-- **Reliability**: No module loading complexity
-- **Maintainability**: All logic in one place for easy debugging
+- **Modularity**: Separate handlers for different protection types
+- **Maintainability**: Clear separation of concerns and easy debugging
+- **Configuration**: Centralized config for easy environment management
 - **Flexibility**: Three-tier protection system handles various use cases
-- **Streaming**: Page-level protection uses HTMLRewriter for efficient transformation
+- **Performance**: Efficient streaming transformation for page-level protection
+- **Testability**: Modular structure allows for isolated testing
 
 ## 🧪 Testing
 
