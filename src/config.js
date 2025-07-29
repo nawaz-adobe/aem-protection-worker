@@ -8,7 +8,7 @@ export default {
     '/fragments/',
     '/nav.plain.html',
     '/footer.plain.html',
-    '/eds-config/'
+    '/eds-config/',
   ],
   
   // Content types that should be processed
