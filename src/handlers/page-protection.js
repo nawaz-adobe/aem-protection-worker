@@ -2,29 +2,29 @@ import config from '../config.js';
 
 export default {
   checkPageLevelProtection($) {
-    const protectedMeta = $('meta[name=\'protected\']');
-    const isPageProtected = protectedMeta.length > 0 && protectedMeta.attr('content') === 'true';
-    const pageTeaserPath = $('meta[name=\'teaser\']').attr('content') || config.DEFAULT_PAGE_TEASER;
+    const pageTeaserMeta = $('meta[name=\'teaser\']');
+    const teaserContent = pageTeaserMeta.attr('content');
+    const hasTeaser = pageTeaserMeta.length > 0 && teaserContent && teaserContent.trim();
     
     return {
-      isProtected: isPageProtected,
-      teaserPath: pageTeaserPath,
+      isPageProtected: hasTeaser,
+      teaserPath: teaserContent,
     };
   },
 
-  generateFragmentHtml(teaserPath, aemOrigin) {
+  generateFragmentHtml(teaserPath) {
     return `<div>
-        <p><a href="${teaserPath}">${aemOrigin}${teaserPath}</a></p>
+        <p><a href="${teaserPath}">${config.AEM_ORIGIN}${teaserPath}</a></p>
       </div>`;
   },
 
-  applyPageLevelProtection(html, teaserPath, originResponse, aemOrigin) {
+  applyPageLevelProtection(html, teaserPath, originResponse) {
     const generateFragment = this.generateFragmentHtml.bind(this);
     
     const rewrittenStream = new HTMLRewriter()
       .on('main', {
         element(el) {
-          el.setInnerContent(generateFragment(teaserPath, aemOrigin), { html: true });
+          el.setInnerContent(generateFragment(teaserPath), { html: true });
         },
       })
       .transform(new Response(html, {

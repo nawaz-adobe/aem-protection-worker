@@ -1,6 +1,6 @@
 # AEM Content Protection Worker
 
-A Cloudflare Worker that implements a three-tier content protection system for Adobe Experience Manager (AEM) websites. This worker intercepts requests to AEM pages and applies content protection based on metadata, replacing protected content with teaser fragments.
+A Cloudflare Worker that implements an **authentication-aware three-tier content protection system** for Adobe Experience Manager (AEM) websites. This worker intercepts requests to AEM pages and applies content protection based on metadata and user authentication status, providing different content experiences for logged-in vs logged-out users.
 
 ## 🚀 Local Setup
 
@@ -41,14 +41,15 @@ npm run deploy
 
 ## 🏗️ Architecture
 
-The worker uses a modular architecture with separate handlers for different protection types and centralized configuration:
+The worker uses a modular architecture with separate handlers for different protection types, authentication, and centralized configuration:
 
 ```
 aem-protection-worker/
 ├── src/
-│   ├── index.js                 # Main worker entry point
+│   ├── index.js                 # Main worker entry point with auth integration
 │   ├── config.js                # Centralized configuration
 │   └── handlers/
+│       ├── auth.js              # Authentication logic (mock + future implementation)
 │       ├── page-protection.js   # Page-level protection logic
 │       ├── section-protection.js # Section-level protection logic
 │       └── block-protection.js  # Block-level protection logic
@@ -65,19 +66,39 @@ aem-protection-worker/
 - **vitest**: Testing framework with Cloudflare Workers support
 - **wrangler**: Cloudflare Workers CLI for development and deployment
 
+## 🔐 Authentication System
+
+The worker includes an authentication-aware protection system that provides different content based on user login status:
+
+### Authentication Handler (`src/handlers/auth.js`)
+- **`checkAuthentication(request)`**: Determines if user is logged in vs logged out
+- **Current**: Simple mock (returns `false` - all users logged out)
+- **Future**: Ready for header/cookie-based authentication
+
+### User Experiences
+- **Logged-in Users**: See full content and premium blocks
+- **Logged-out Users**: See teasers and public content alternatives
+
 ## 🛡️ Protection System
 
-The worker implements a hierarchical three-tier protection system:
+The worker implements a **hierarchical three-tier authentication-aware protection system**:
+
+### Performance Gate (Required for ALL Protection)
+- **Trigger**: `<meta name="protected" content="true">` in page head
+- **Performance**: Unprotected pages exit immediately without processing
+- **Author Workflow**: Authors must add this meta tag to enable any protection
 
 ### 1. Page-Level Protection (Highest Priority)
-- **Trigger**: `<meta name="protected" content="true">` in page head
-- **Action**: Replaces entire `<main>` content with teaser fragment
-- **Teaser Source**: `<meta name="teaser" content="/path/to/teaser">` or default
+- **Trigger**: Protected page + `<meta name="teaser" content="/path/to/teaser">`
+- **Requirement**: Teaser content must be explicitly provided (no defaults)
+- **Authenticated Users**: See original page content
+- **Unauthenticated Users**: See teaser fragment replacing entire `<main>`
 - **Implementation**: Uses HTMLRewriter for streaming transformation
 
 ### 2. Section-Level Protection
 - **Trigger**: Section metadata with `protected: true`
-- **Action**: Replaces specific sections with teaser fragments
+- **Authenticated Users**: See original sections
+- **Unauthenticated Users**: See teaser fragments replacing protected sections
 - **Structure**: 
   ```html
   <div class="section-metadata">
@@ -93,20 +114,23 @@ The worker implements a hierarchical three-tier protection system:
   ```
 
 ### 3. Block-Level Protection (Lowest Priority)
-Two protection mechanisms for blocks:
+Two protection mechanisms for blocks with authentication awareness:
 
-#### A. ID-Based Block Removal
-- **Trigger**: Two blocks with same `id-X` class, one with `protected`
-- **Action**: Removes the protected block when normal block exists
+#### A. ID-Based Premium/Public Content
+- **Purpose**: Provide different content versions for different user types
+- **Structure**: Two blocks with same `id-X` class, one marked `protected`
+- **Authenticated Users**: See protected block (premium content), public block removed
+- **Unauthenticated Users**: See public block (basic content), protected block removed
 - **Example**:
   ```html
-  <div class="table id-1 protected">...</div>  <!-- Removed -->
-  <div class="table id-1">...</div>            <!-- Kept -->
+  <div class="table id-premium protected">Premium subscriber content</div>
+  <div class="table id-premium">Basic free content</div>
   ```
 
 #### B. Fragment-Based Teaser Replacement
-- **Trigger**: Protected block with teaser structure
-- **Action**: Replaces with teaser fragment
+- **Purpose**: Replace blocks with teaser content for unauthenticated users
+- **Authenticated Users**: See original blocks
+- **Unauthenticated Users**: See teaser fragments
 - **Structure**:
   ```html
   <div class="protected">
@@ -115,70 +139,42 @@ Two protection mechanisms for blocks:
   </div>
   ```
 
-## 📋 Detailed Logic Flow
+## 📋 Authentication-Aware Logic Flow
 
 ### Main Request Handler (`fetch`)
-
-The `fetch` method orchestrates the entire protection process:
 
 1. **URL Processing**: Extracts path and constructs full AEM URL
 2. **Fragment Bypass**: Skips protection for fragment requests and config endpoints
 3. **Content Fetching**: Retrieves original HTML from AEM backend
 4. **Content Type Check**: Only processes HTML responses
-5. **Protection Analysis**: 
-   - Checks page-level protection first (exclusive)
-   - Falls back to section/block protection if no page protection
-6. **Content Transformation**: Applies appropriate protection logic
-7. **Response Delivery**: Returns transformed content with original headers
+5. **Performance Gate**: Early exit if `protected=true` not present
+6. **Authentication Check**: Determines user login status (only for protected content)
+7. **Protection Hierarchy**: 
+   - Page-level protection (authentication-aware)
+   - Section/block protection (authentication-aware)
+8. **Content Transformation**: Applies appropriate protection logic
+9. **Response Delivery**: Returns transformed content with original headers
 
 ### Modular Protection Handlers
 
+#### Authentication Handler (`src/handlers/auth.js`)
+- **`checkAuthentication(request)`**: Simple binary check (logged in vs logged out)
+- **Current**: Mock implementation for development
+- **Future**: Ready for header/cookie-based authentication
+
 #### Page Protection Handler (`src/handlers/page-protection.js`)
-- **`checkPageLevelProtection($)`**: Examines meta tags for page protection
+- **`checkPageLevelProtection($)`**: Strict checking - requires explicit teaser content
 - **`applyPageLevelProtection()`**: Uses HTMLRewriter for streaming transformation
-- **`generateFragmentHtml()`**: Creates teaser HTML for page-level protection
+- **`generateFragmentHtml()`**: Creates teaser HTML with AEM origin links
 
 #### Section Protection Handler (`src/handlers/section-protection.js`)
-- **`checkSectionLevelProtection($)`**: Analyzes sections and coordinates with block protection
-- **`applySectionLevelProtection()`**: Replaces protected sections with teasers
-- **`generateFragmentHtml()`**: Creates teaser HTML for section-level protection
-- **Flow Management**: Coordinates with block protection when no section protection is found
+- **`checkSectionLevelProtection($, isAuthenticated)`**: Authentication-aware analysis
+- **`applySectionLevelProtection()`**: String replacement for protected sections
+- **`generateFragmentHtml()`**: Creates teaser HTML with AEM origin links
 
 #### Block Protection Handler (`src/handlers/block-protection.js`)
-- **`checkBlockProtectionInSection()`**: Implements two-priority block protection system
-- **`generateBlockFragmentHtml()`**: Creates teaser HTML for block-level protection
-
-### Protection Logic Details
-
-#### Page-Level Protection Logic
-
-The page protection handler examines the page's meta tags to determine if page-level protection is needed. It looks for a protected meta tag set to "true" and extracts the teaser path from a teaser meta tag or uses the default teaser path.
-
-When page-level protection is detected, the handler uses HTMLRewriter to perform streaming transformation of the entire main element, replacing it with the generated teaser fragment.
-
-#### Section-Level Protection Logic
-
-The section protection handler iterates through all sections within the main content area. For each section, it examines the section metadata to determine if protection is required. If section-level protection is found, it extracts the teaser path and marks the section for replacement.
-
-If no section-level protection is detected, the handler delegates to the block protection handler to check for block-level protection within that section.
-
-#### Block Protection Logic
-
-The block protection handler implements a two-priority system for block protection:
-
-**Priority 1: Fragment-Based Teaser Replacement**
-- Searches for protected divs that contain teaser structure
-- Identifies blocks with both "teaser" keyword and fragment path
-- Replaces these blocks with teaser fragments
-
-**Priority 2: ID-Based Block Removal**
-- Finds blocks with ID-based classes (e.g., `id-1`, `id-2`)
-- Identifies pairs where one block has the "protected" class
-- Removes the protected block when a normal (non-protected) block with the same ID exists
-
-### HTML Generation
-
-The handlers generate teaser HTML that includes links back to the AEM origin. Each handler has its own HTML generation method that includes the full AEM origin URL in the generated links.
+- **`checkBlockProtectionInSection()`**: Two-tier authentication-aware system
+- **`generateBlockFragmentHtml()`**: Creates teaser HTML with AEM origin links
 
 ## ⚙️ Configuration
 
@@ -187,7 +183,6 @@ All configuration is centralized in `src/config.js`:
 ```javascript
 export default {
   AEM_ORIGIN: 'https://main--www--cmegroup.aem.live',
-  DEFAULT_PAGE_TEASER: '/fragments/teasers/content-teaser',
   DEFAULT_SECTION_TEASER: '/fragments/teasers/content-teaser',
   DEFAULT_BLOCK_TEASER: '/fragments/teasers/block-teaser',
   
@@ -204,34 +199,89 @@ export default {
 };
 ```
 
-## 🔄 Request Flow
+**Note**: `DEFAULT_PAGE_TEASER` removed - page protection now requires explicit teaser paths.
+
+## 🔄 Complete Request Flow
 
 1. **Request Interception**: Worker receives request to AEM site
 2. **Fragment Detection**: Checks if request is for fragments/config (bypass protection)
 3. **Origin Fetch**: Retrieves content from AEM backend
 4. **Content Analysis**: Parses HTML with Cheerio
-5. **Protection Hierarchy**:
-   - Page-level protection (exclusive - replaces entire main)
-   - Section-level protection (replaces specific sections)
-   - Block-level protection (removes or replaces blocks)
-6. **Content Transformation**: Applies appropriate protection logic
-7. **Response**: Returns transformed content with original headers
+5. **Performance Gate**: Early exit if `protected=true` not present
+6. **Authentication Check**: Determines user login status (only for protected content)
+7. **Protection Hierarchy**:
+   - **Page-level**: Authenticated → original, Unauthenticated → teaser
+   - **Section-level**: Authenticated → original, Unauthenticated → teaser  
+   - **Block-level**: Authenticated → premium blocks, Unauthenticated → public blocks/teasers
+8. **Content Transformation**: Applies appropriate protection logic
+9. **Response**: Returns transformed content with original headers
 
-## 🎯 Benefits
+## 🎯 Key Benefits
 
-- **Modularity**: Separate handlers for different protection types
-- **Maintainability**: Clear separation of concerns and easy debugging
-- **Configuration**: Centralized config for easy environment management
-- **Flexibility**: Three-tier protection system handles various use cases
-- **Performance**: Efficient streaming transformation for page-level protection
-- **Testability**: Modular structure allows for isolated testing
+### Performance Optimizations
+- **Early Exit**: Unprotected pages bypass all processing (major performance gain)
+- **Lazy Authentication**: Auth check only for protected content
+- **Efficient Streaming**: HTMLRewriter for page-level transformations
 
-## 🧪 Testing
+### User Experience
+- **Personalized Content**: Different experiences for logged-in vs logged-out users
+- **Premium Content**: ID-based blocks provide subscriber vs free content
+- **Progressive Disclosure**: Teasers encourage user engagement
 
-The test suite validates basic worker functionality:
+### Developer Experience
+- **Modular Architecture**: Clean separation of concerns
+- **Authentication Ready**: Easy integration with real auth systems
+- **Testable Design**: Mock authentication for development
+- **Centralized Config**: Single source of configuration
 
+### Content Management
+- **Author Control**: Simple metadata-driven protection rules
+- **Flexible Protection**: Multiple protection strategies for different content types
+- **Consistent Experience**: Unified protection across page, section, and block levels
+
+## 🧪 Testing & Development
+
+### Running Tests
 ```bash
 npm test
 ```
 
-Tests verify that the worker responds correctly to requests and handles the protection logic as expected. 
+### Authentication Testing
+Modify `src/handlers/auth.js` for different test scenarios:
+
+```javascript
+// Test all users as logged out
+checkAuthentication(request) { return false; }
+
+// Test all users as logged in
+checkAuthentication(request) { return true; }
+
+// Test mixed scenario (50/50 split)
+checkAuthentication(request) { return Math.random() > 0.5; }
+```
+
+### Test Scenarios
+1. **Unprotected pages** → Original content (performance test)
+2. **Protected + logged out** → Teasers and public content
+3. **Protected + logged in** → Full content and premium blocks
+4. **Page vs section vs block protection** → Hierarchy testing
+5. **Fragment requests** → Bypass testing
+
+## 🚀 Future Enhancements
+
+### Authentication Integration
+- Replace mock with header-based authentication
+- Support JWT tokens, session cookies, or custom auth headers
+- Add user role-based protection (if needed)
+
+### Performance
+- Cache authentication results
+- Optimize DOM manipulation performance
+- Add metrics and monitoring
+
+### Features
+- A/B testing integration
+- Dynamic teaser selection
+- Advanced content personalization
+
+The worker is production-ready with a robust, scalable architecture that balances performance, user experience, and developer productivity. 

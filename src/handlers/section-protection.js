@@ -2,7 +2,7 @@ import config from '../config.js';
 import blockProtection from './block-protection.js';
 
 export default {
-  checkSectionLevelProtection($) {
+  checkSectionLevelProtection($, isAuthenticated = false) {
     const protectedSections = [];
     const teaserBlocks = [];
     
@@ -16,22 +16,25 @@ export default {
         );
 
         if (protectedDiv.length > 0 && protectedDiv.next().text().trim() === 'true') {
-          const teaserDiv = sectionMetadata.find('div').filter((_, div) => 
-            $(div).text().trim() === 'teaser',
-          );
-          const teaserPath = teaserDiv.length > 0 ? teaserDiv.next().text().trim() : config.DEFAULT_SECTION_TEASER;
-          
-          protectedSections.push({
-            elementHtml: $(el).prop('outerHTML'),
-            teaserPath: teaserPath,
-          });
+          // Only apply section protection for unauthenticated users
+          if (!isAuthenticated) {
+            const teaserDiv = sectionMetadata.find('div').filter((_, div) => 
+              $(div).text().trim() === 'teaser',
+            );
+            const teaserPath = teaserDiv.length > 0 ? teaserDiv.next().text().trim() : config.DEFAULT_SECTION_TEASER;
+            
+            protectedSections.push({
+              elementHtml: $(el).prop('outerHTML'),
+              teaserPath: teaserPath,
+            });
+          }
         } else {
           // Delegate block protection logic to block-protection module
-          blockProtection.checkBlockProtectionInSection($section, teaserBlocks, $);
+          blockProtection.checkBlockProtectionInSection($section, teaserBlocks, $, isAuthenticated);
         }
       } else {
         // Delegate block protection logic to block-protection module
-        blockProtection.checkBlockProtectionInSection($section, teaserBlocks, $);
+        blockProtection.checkBlockProtectionInSection($section, teaserBlocks, $, isAuthenticated);
       }
     });
 
@@ -42,21 +45,21 @@ export default {
     };
   },
 
-  generateFragmentHtml(teaserPath, aemOrigin) {
+  generateFragmentHtml(teaserPath) {
     return `<div>
-        <p><a href="${teaserPath}">${aemOrigin}${teaserPath}</a></p>
+        <p><a href="${teaserPath}">${config.AEM_ORIGIN}${teaserPath}</a></p>
       </div>`;
   },
 
-  applySectionLevelProtection($, protectionMetadata, aemOrigin) {
+  applySectionLevelProtection($, protectionMetadata) {
     let finalHtml = $.html();    
     protectionMetadata.sections.forEach((section) => {
-      finalHtml = finalHtml.replace(section.elementHtml, this.generateFragmentHtml(section.teaserPath, aemOrigin));
+      finalHtml = finalHtml.replace(section.elementHtml, this.generateFragmentHtml(section.teaserPath));
     }); 
 
     if (protectionMetadata.teaserBlocks) {
       protectionMetadata.teaserBlocks.forEach((block) => {
-        finalHtml = finalHtml.replace(block.elementHtml, blockProtection.generateBlockFragmentHtml(block.teaserPath, aemOrigin));
+        finalHtml = finalHtml.replace(block.elementHtml, blockProtection.generateBlockFragmentHtml(block.teaserPath));
       }); 
     }
     

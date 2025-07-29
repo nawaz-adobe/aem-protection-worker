@@ -1,6 +1,5 @@
 export default {
   AEM_ORIGIN: 'https://main--www--cmegroup.aem.live',
-  DEFAULT_PAGE_TEASER: '/fragments/teasers/content-teaser',
   DEFAULT_SECTION_TEASER: '/fragments/teasers/content-teaser',
   DEFAULT_BLOCK_TEASER: '/fragments/teasers/block-teaser',
   
