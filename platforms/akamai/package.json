@@ -1,0 +1,19 @@
+{
+	"name": "aem-protection-worker-akamai",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"build:production": "webpack --config webpack.edgeworkers.js",
+		"validate": "node validate-constraints.js",
+		"build:validate": "npm run build:production && npm run validate",
+		"deploy": "./deploy-production.sh",
+		"lint": "eslint src/",
+		"lint:fix": "eslint src/ --fix"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.31.0",
+		"eslint": "^9.31.0",
+		"webpack": "^5.88.0",
+		"webpack-cli": "^5.1.0"
+	}
+}

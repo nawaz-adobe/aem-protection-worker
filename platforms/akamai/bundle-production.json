@@ -1,0 +1,5 @@
+{
+	"edgeworker-version": "1.0.0",
+	"description": "AEM Content Protection Worker - Production Optimized for Akamai EdgeWorkers",
+	"main": "main.js"
+}

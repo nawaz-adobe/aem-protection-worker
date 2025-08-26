@@ -134,3 +134,6 @@ jspm_packages/
 # Cloudflare Worker specific
 .wrangler/
 wrangler.toml
+
+# Dev Time Machine snapshots
+.checkpoints/
