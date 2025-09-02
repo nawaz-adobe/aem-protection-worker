@@ -152,9 +152,13 @@ export async function responseProvider(request) {
   try {
     const startTime = Date.now();
     
-    // Parse request URL
-    const reqUrl = new URL(request.url);
-    const path = reqUrl.pathname;
+    // Parse request URL manually (EdgeWorkers doesn't have URL constructor)
+    const url = request.url;
+    const pathMatch = url.match(/https?:\/\/[^\/]+(.*)$/);
+    const fullPath = pathMatch ? pathMatch[1] : '/';
+    const questionIndex = fullPath.indexOf('?');
+    const path = questionIndex !== -1 ? fullPath.substring(0, questionIndex) : fullPath;
+    const search = questionIndex !== -1 ? fullPath.substring(questionIndex) : '';
     
     // Quick bypass check for performance
     const shouldBypass = CONFIG.BYPASS_PATHS.some(bypassPath => 
@@ -163,13 +167,13 @@ export async function responseProvider(request) {
     
     if (shouldBypass) {
       // Fetch and return origin response directly
-      const fullUrl = new URL(reqUrl.pathname + reqUrl.search, CONFIG.AEM_ORIGIN);
-      return await httpRequest(fullUrl.toString());
+      const fullUrl = CONFIG.AEM_ORIGIN + path + search;
+      return await httpRequest(fullUrl);
     }
 
     // Fetch origin content
-    const fullUrl = new URL(reqUrl.pathname + reqUrl.search, CONFIG.AEM_ORIGIN);
-    const originResponse = await httpRequest(fullUrl.toString());
+    const fullUrl = CONFIG.AEM_ORIGIN + path + search;
+    const originResponse = await httpRequest(fullUrl);
     
     // Only process HTML content
     const contentType = originResponse.getHeader('content-type') || '';

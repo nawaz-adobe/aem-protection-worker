@@ -137,3 +137,5 @@ wrangler.toml
 
 # Dev Time Machine snapshots
 .checkpoints/
+
+*.DS_Store
