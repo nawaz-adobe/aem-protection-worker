@@ -90,17 +90,30 @@ function applySectionProtection(html) {
   let modifiedHtml = html;
   let modified = false;
   
-  // Find sections with protection metadata
-  // Pattern: <div>...<div class="section-metadata">...<div>protected</div><div>true</div>...
-  const sectionPattern = /<div[^>]*>\s*<div[^>]*class=["'][^"']*section-metadata[^"']*["'][^>]*>[\s\S]*?<div[^>]*>\s*protected\s*<\/div>\s*<div[^>]*>\s*true\s*<\/div>[\s\S]*?<\/div>\s*<\/div>/gi;
+  // Match sections with section-metadata div
+  const sectionPattern = /<div[^>]*>[\s\S]*?<div[^>]*class=["'][^"']*section-metadata[^"']*["'][^>]*>[\s\S]*?<\/div>\s*<\/div>/gi;
+  // Check for protected=true in metadata
+  const protectedPattern = /<div[^>]*>\s*<div[^>]*>\s*protected\s*<\/div>\s*<div[^>]*>\s*true\s*<\/div>\s*<\/div>/i;
   
   modifiedHtml = modifiedHtml.replace(sectionPattern, (match) => {
+    if (!protectedPattern.test(match)) {
+      return match;
+    }
+    
     modified = true;
     
-    // Try to extract teaser path from the section metadata
-    const teaserMatch = match.match(/<div[^>]*>\s*teaser\s*<\/div>\s*<div[^>]*>\s*([^<\s]+)\s*<\/div>/i);
-    const teaserPath = teaserMatch ? teaserMatch[1].trim() : CONFIG.DEFAULT_SECTION_TEASER;
+    // Extract teaser path from metadata
+    const teaserMatch = match.match(/<div[^>]*>\s*<div[^>]*>\s*teaser\s*<\/div>\s*<div[^>]*>\s*([^<]+?)\s*<\/div>\s*<\/div>/i);
+    let teaserPath = CONFIG.DEFAULT_SECTION_TEASER;
     
+    if (teaserMatch) {
+      const extractedPath = teaserMatch[1].trim();
+      if (extractedPath && extractedPath.length > 0 && extractedPath !== 'true' && extractedPath !== 'false') {
+        teaserPath = extractedPath;
+      }
+    }
+    
+    console.log(`[EdgeWorkers] Section protection applied with teaser: ${teaserPath}`);
     return generateTeaserHtml(teaserPath);
   });
   
