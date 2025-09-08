@@ -2,12 +2,6 @@ import { load } from 'cheerio';
 import config from './config.js';
 import auth from './handlers/auth.js';
 
-/**
- * Process content based on authentication state
- * @param {string} html - The HTML content to process
- * @param {boolean} isAuthenticated - Whether the user is authenticated
- * @returns {string} - The processed HTML
- */
 function processContent(html, isAuthenticated) {
   const $ = load(html);
   
