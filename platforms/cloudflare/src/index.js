@@ -1,11 +1,63 @@
 import { load } from 'cheerio';
 import config from './config.js';
-import pageProtection from './handlers/page-protection.js';
-import sectionProtection from './handlers/section-protection.js';
 import auth from './handlers/auth.js';
 
+/**
+ * Process content based on authentication state
+ * @param {string} html - The HTML content to process
+ * @param {boolean} isAuthenticated - Whether the user is authenticated
+ * @returns {string} - The processed HTML
+ */
+function processContent(html, isAuthenticated) {
+  const $ = load(html);
+  
+  const gatedMeta = $('meta[name="gated"]');
+  const isGated = gatedMeta.length > 0 && gatedMeta.attr('content') === 'true';
+  
+  if (!isGated) {
+    return html;
+  }
+
+  const sectionsToRemove = [];
+  
+  $('main > div').each((_, sectionEl) => {
+    const $section = $(sectionEl);
+    const sectionMetadata = $section.find('.section-metadata');
+    
+    if (sectionMetadata.length > 0) {
+      const viewDiv = sectionMetadata.find('div').filter((_, div) => 
+        $(div).text().trim() === 'view'
+      );
+      
+      if (viewDiv.length > 0) {
+        const viewValue = viewDiv.next().text().trim();
+        const shouldRemove = (isAuthenticated && viewValue === 'logged-out') || 
+                           (!isAuthenticated && viewValue === 'logged-in');
+        
+        if (shouldRemove) {
+          sectionsToRemove.push($section);
+        }
+      }
+    }
+    
+    const willBeRemoved = sectionsToRemove.includes($section);
+    if (!willBeRemoved) {
+      if (isAuthenticated) {
+        $section.find('[class*="logged-out"]').remove();
+      } else {
+        $section.find('[class*="logged-in"]').remove();
+      }
+    }
+  });
+  
+  sectionsToRemove.forEach($section => {
+    $section.remove();
+  });
+
+  return $.html();
+}
+
 export default {
-  // Entry point for edge worker
   async fetch(request) {
     try {
       const reqUrl = new URL(request.url);
@@ -13,7 +65,6 @@ export default {
       const fullUrl = new URL(reqUrl.pathname + reqUrl.search, config.AEM_ORIGIN);
       const originResponse = await fetch(fullUrl, request);
 
-      // Bypass protection logic for all fragment requests and config endpoints
       const shouldBypass = config.BYPASS_PATHS.some(bypassPath => path.startsWith(bypassPath));
       if (shouldBypass) {
         return originResponse;
@@ -25,64 +76,10 @@ export default {
       }
 
       const html = await originResponse.text();
-      const $ = load(html);
-
-      // Early performance optimization: check if any protection is needed
-      const protectedMeta = $('meta[name=\'protected\']');
-      const isProtected = protectedMeta.length > 0 && protectedMeta.attr('content') === 'true';
-      
-      if (!isProtected) {
-        return new Response(html, {
-          status: originResponse.status,
-          headers: originResponse.headers,
-        });
-      }
-
-      // Content is protected - check if user is authenticated
       const isAuthenticated = auth.checkAuthentication(request);
-
-      // Check if it's page-level protection (has teaser)
-      const pageProtectionMetadata = pageProtection.checkPageLevelProtection($);
-      if (pageProtectionMetadata.isPageProtected) {
-        // Page protection exists - handle based on authentication
-        if (isAuthenticated) {
-          return new Response(html, {
-            status: originResponse.status,
-            headers: originResponse.headers,
-          });
-        } else {
-          return pageProtection.applyPageLevelProtection(html, pageProtectionMetadata.teaserPath, originResponse);
-        }
-      }
-
-      // No page protection - continue to section/block protection
-      let modifiedHtml = html;
-      let protectionApplied = false;
-
-      // Check for section-level protection (includes block protection)
-      const sectionProtectionMetadata = sectionProtection.checkSectionLevelProtection($, isAuthenticated);
-      if (sectionProtectionMetadata.isProtected) {
-        modifiedHtml = sectionProtection.applySectionLevelProtection($, sectionProtectionMetadata);
-        protectionApplied = true;
-      }
-
-      if (protectionApplied) {
-        return new Response(modifiedHtml, {
-          status: originResponse.status,
-          headers: originResponse.headers,
-        });
-      }
-
-      // For authenticated users, always return DOM state in case blocks were removed
-      // even if no teaser replacements were applied
-      if (isAuthenticated) {
-        return new Response($.html(), {
-          status: originResponse.status,
-          headers: originResponse.headers,
-        });
-      }
-
-      return new Response(html, {
+      const processedHtml = processContent(html, isAuthenticated);
+      
+      return new Response(processedHtml, {
         status: originResponse.status,
         headers: originResponse.headers,
       });
