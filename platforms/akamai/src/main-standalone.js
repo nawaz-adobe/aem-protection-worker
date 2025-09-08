@@ -10,7 +10,7 @@ const config = {
     '/footer.plain.html',
     '/eds-config/',
   ],
-  HTML_CONTENT_TYPES: ['text/html'],
+  HTML_CONTENT_TYPES: ['text/html']
 };
 
 // Inlined authentication - exported for testing
@@ -84,12 +84,44 @@ function processContent(html, isAuthenticated) {
     processedHtml = processedHtml.replace(mainMatch[0], `<main${mainMatch[0].substring(5, mainMatch[0].indexOf('>'))}>${newMainContent}</main>`);
   }
 
-  // Block-level processing
-  const pattern = isAuthenticated 
-    ? /<div[^>]*class=["'][^"']*logged-out[^"']*["'][^>]*>[\s\S]*?<\/div>/gi
-    : /<div[^>]*class=["'][^"']*logged-in[^"']*["'][^>]*>[\s\S]*?<\/div>/gi;
+  // Block-level processing with balanced div matching
+  const targetClass = isAuthenticated ? 'logged-out' : 'logged-in';
+  const classPattern = new RegExp(`<div[^>]*class=["'][^"']*${targetClass}[^"']*["'][^>]*>`, 'gi');
+  let blockMatch;
+  const blocksToRemove = [];
   
-  processedHtml = processedHtml.replace(pattern, '');
+  while ((blockMatch = classPattern.exec(processedHtml)) !== null) {
+    const divStart = blockMatch.index;
+    let depth = 1;
+    let pos = divStart + blockMatch[0].length;
+    
+    while (pos < processedHtml.length && depth > 0) {
+      const nextOpenDiv = processedHtml.indexOf('<div', pos);
+      const nextCloseDiv = processedHtml.indexOf('</div>', pos);
+      
+      if (nextCloseDiv === -1) {
+        break;
+      }
+      
+      if (nextOpenDiv !== -1 && nextOpenDiv < nextCloseDiv) {
+        depth++;
+        pos = nextOpenDiv + 4;
+      } else {
+        depth--;
+        pos = nextCloseDiv + 6;
+        
+        if (depth === 0) {
+          blocksToRemove.push(processedHtml.substring(divStart, pos));
+          break;
+        }
+      }
+    }
+  }
+  
+  // Remove blocks in reverse order to avoid index shifting
+  for (const block of blocksToRemove.reverse()) {
+    processedHtml = processedHtml.replace(block, '');
+  }
 
   return processedHtml;
 }

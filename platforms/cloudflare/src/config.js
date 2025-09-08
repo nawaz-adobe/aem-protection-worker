@@ -6,5 +6,5 @@ export default {
     '/footer.plain.html',
     '/eds-config/',
   ],
-  HTML_CONTENT_TYPES: ['text/html'],
+  HTML_CONTENT_TYPES: ['text/html']
 }; 

@@ -287,6 +287,72 @@ describe('AEM Protection Worker - Akamai', () => {
       expect(response.body).not.toContain('Member-only Article');
     });
 
+    it('should handle deeply nested divs correctly (balanced matching)', async () => {
+      vi.spyOn(auth, 'checkAuthentication').mockReturnValue(false);
+      
+      const html = `
+        <html>
+        <head>
+          <meta name="gated" content="true">
+          <title>Nested Test</title>
+        </head>
+        <body>
+          <main>
+            <div>
+              <h2>Complex Nested Content</h2>
+              <div class="brightcove logged-in">
+                <div>
+                  <div>accountID</div>
+                  <div>49919183001</div>
+                </div>
+                <div>
+                  <div>videoID</div>
+                  <div>ref:170918ClearingStructure</div>
+                </div>
+                <div>
+                  <div>aspectRatio</div>
+                  <div>16:9</div>
+                </div>
+              </div>
+              <div class="fragment logged-out">
+                <div>
+                  <div><a href="/teaser">Video Teaser</a></div>
+                </div>
+              </div>
+              <p>Regular content</p>
+            </div>
+          </main>
+        </body>
+        </html>
+      `;
+
+      global.httpRequest.mockResolvedValue({
+        status: 200,
+        getHeader: vi.fn((name) => name === 'content-type' ? 'text/html' : null),
+        getHeaders: vi.fn(() => ({ 'content-type': 'text/html' })),
+        text: vi.fn().mockResolvedValue(html),
+      });
+
+      const request = global.mockRequest('https://example.com/nested-test');
+      const response = await responseProvider(request);
+      
+      // Should contain logged-out content and regular content
+      expect(response.body).toContain('Video Teaser');
+      expect(response.body).toContain('Regular content');
+      
+      // Should NOT contain any of the nested logged-in content
+      expect(response.body).not.toContain('brightcove');
+      expect(response.body).not.toContain('accountID');
+      expect(response.body).not.toContain('49919183001');
+      expect(response.body).not.toContain('videoID');
+      expect(response.body).not.toContain('170918ClearingStructure');
+      
+      // Critical: Check div balance (no dangling tags from greedy regex)
+      const openDivs = (response.body.match(/<div/g) || []).length;
+      const closeDivs = (response.body.match(/<\/div>/g) || []).length;
+      expect(openDivs).toBe(closeDivs); // This would fail with greedy regex
+    });
+
     it('should handle multiple sections and blocks correctly', async () => {
       vi.spyOn(auth, 'checkAuthentication').mockReturnValue(false);
       const html = `
