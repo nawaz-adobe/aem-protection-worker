@@ -10,7 +10,7 @@ const config = {
     '/footer.plain.html',
     '/eds-config/',
   ],
-  HTML_CONTENT_TYPES: ['text/html']
+  HTML_CONTENT_TYPES: ['text/html'],
 };
 
 // Inlined authentication - exported for testing
@@ -65,18 +65,32 @@ function processContent(html, isAuthenticated) {
       }
     }
     
-    for (const section of sections) {
-      if (section.includes('section-metadata')) {
-        const viewMatch = section.match(/<div[^>]*>\s*<div[^>]*>\s*view\s*<\/div>\s*<div[^>]*>\s*(logged-in|logged-out)\s*<\/div>\s*<\/div>/i);
+    // Filter to only top-level sections (simple heuristic: sections that contain section-metadata are typically top-level)
+    const topLevelSections = sections.filter((section, index) => {
+      if (!section.includes('section-metadata')) {
+        return false;
+      }
+      
+      // Check if this section is contained within another section
+      for (let i = 0; i < sections.length; i++) {
+        if (i !== index && sections[i].includes(section) && sections[i].length > section.length) {
+          return false; // This section is contained in another section
+        }
+      }
+      return true;
+    });
+    
+    // Process top-level sections only
+    for (const section of topLevelSections) {
+      const viewMatch = section.match(/<div[^>]*>\s*<div[^>]*>\s*view\s*<\/div>\s*<div[^>]*>\s*(logged-in|logged-out)\s*<\/div>\s*<\/div>/i);
+      
+      if (viewMatch) {
+        const viewValue = viewMatch[1];
+        const shouldRemove = (isAuthenticated && viewValue === 'logged-out') ||
+                           (!isAuthenticated && viewValue === 'logged-in');
         
-        if (viewMatch) {
-          const viewValue = viewMatch[1];
-          const shouldRemove = (isAuthenticated && viewValue === 'logged-out') ||
-                             (!isAuthenticated && viewValue === 'logged-in');
-          
-          if (shouldRemove) {
-            newMainContent = newMainContent.replace(section, '');
-          }
+        if (shouldRemove) {
+          newMainContent = newMainContent.replace(section, '');
         }
       }
     }
